@@ -11,7 +11,6 @@ We use [JOOQ](github.com/jOOQ/jOOQ) for convenience. The build is configured
 with JOOQ's code-generator plugin. It generates type-safe Java classes to interact
 with the [cluster state schema](src/main/resources/schema.sql).
 
-
 To build this project:
 
 ```shell

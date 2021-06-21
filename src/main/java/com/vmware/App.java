@@ -1,6 +1,8 @@
 package com.vmware;
 
 import com.vmware.dcm.Model;
+import com.vmware.generated.Tables;
+import com.vmware.generated.tables.records.VmRecord;
 import org.jooq.DSLContext;
 import org.jooq.Record;
 import org.jooq.Result;
@@ -14,6 +16,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.jooq.impl.DSL.nullif;
 import static org.jooq.impl.DSL.using;
 
 public class App {
@@ -23,6 +26,16 @@ public class App {
     App(final List<String> constraints) {
         conn = setup();
         model = Model.build(conn, constraints);
+    }
+
+    public void insertData(final int vmId) {
+        conn.insertInto(Tables.VM)
+            .values(vmId, null)
+            .execute();
+    }
+
+    public Result<VmRecord> getVmState() {
+        return conn.fetch(Tables.VM);
     }
 
     public Result<? extends Record> solve() {
