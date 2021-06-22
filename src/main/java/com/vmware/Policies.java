@@ -8,6 +8,9 @@ package com.vmware;
 import java.util.List;
 
 public class Policies {
+    /*
+     * Enforce the affinity/anti-affinities computed in the replica_to_node_constraint_matching view
+     */
     private static String nodeAffinityAndAntiAffinity() {
         return "CREATE VIEW node_affinity_anti_affinity AS " +
                 "SELECT * FROM replica r " +

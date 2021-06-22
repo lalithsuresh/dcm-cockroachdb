@@ -1,5 +1,5 @@
 CREATE TABLE node (
-    id INTEGER NOT NULL
+    id INTEGER NOT NULL PRIMARY KEY
 );
 
 CREATE TABLE node_label (
@@ -9,8 +9,9 @@ CREATE TABLE node_label (
     FOREIGN KEY (id) REFERENCES node(id) ON DELETE CASCADE
 );
 
+-- TODO: add non-voting/voting replica distinction
 CREATE TABLE replica (
-    id INTEGER NOT NULL,
+    id INTEGER NOT NULL PRIMARY KEY,
     shardId INTEGER NOT NULL,
     status VARCHAR(10) NOT NULL,
     controllable__node INTEGER,
@@ -26,6 +27,8 @@ CREATE TABLE replica_constraint (
     FOREIGN KEY (id) REFERENCES replica(id) ON DELETE CASCADE
 );
 
+-- For each replica, compute the set of nodes they are affine
+-- or anti-affine to (depending on the type of replica constraint)
 CREATE VIEW replica_to_node_constraint_matching AS
     SELECT rc.id AS replica_id,
            rc.shardId,
