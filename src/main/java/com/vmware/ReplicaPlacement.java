@@ -76,7 +76,7 @@ public class ReplicaPlacement {
 
     public void printState() {
         for (final Table<?> table: List.of(Tables.NODE, Tables.NODE_LABEL, Tables.REPLICA, Tables.REPLICA_CONSTRAINT,
-                                           Tables.REPLICA_TO_NODE_CONSTRAINT_MATCHING)) {
+                                           Tables.REPLICA_TO_NODE_CONSTRAINT_MATCHING, Tables.NODE_AZS)) {
             System.out.println("---" + table.getName() + "---");
             System.out.println(conn.fetch(table));
         }

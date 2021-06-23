@@ -33,10 +33,20 @@ CREATE VIEW replica_to_node_constraint_matching AS
     SELECT rc.id AS replica_id,
            rc.shardId,
            rc.type,
-           ARRAY_AGG(nl.id) AS node_id
+           ARRAY_AGG(nl.id) AS node_id_list
     FROM replica_constraint rc
     JOIN node_label nl
         ON   rc.label_key = nl.label_key
          AND (rc.label_value IS NULL
               OR rc.label_value = nl.label_value)
     GROUP BY rc.id, rc.shardId, rc.type;
+
+
+-- Find the AZ for each node, if configured
+CREATE VIEW node_azs AS
+    SELECT node.id AS node_id,
+           nl.label_value AS az
+    FROM node_label nl
+    JOIN node
+        ON node.id = nl.id
+    WHERE nl.label_key = 'az' AND nl.label_value IS NOT NULL;
