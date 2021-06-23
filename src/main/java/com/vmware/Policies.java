@@ -26,14 +26,14 @@ public class Policies {
      */
     private static List<String> spreadReplicasAcrossAzs() {
         final String countsPerShardPerAzVariable = "CREATE VIEW count_per_shard_per_az AS " +
-                                       "SELECT r.shardid, na.az, count(*) as total " +
+                                       "SELECT r.range_id, na.az, count(*) as total " +
                                        "FROM replica r " +
                                        "JOIN node_azs na" +
                                         " ON r.controllable__node = na.node_id " +
-                                       "GROUP BY r.shardId, na.az";
+                                       "GROUP BY r.range_id, na.az";
         final String spreadReplicasAcrossAzs = "CREATE VIEW spread_replicas AS " +
                                       "SELECT * FROM count_per_shard_per_az " +
-                                      "GROUP BY shardId " +
+                                      "GROUP BY range_id " +
                                       "maximize min(total)";
         return List.of(countsPerShardPerAzVariable, spreadReplicasAcrossAzs);
     }
