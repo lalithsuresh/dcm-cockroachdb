@@ -253,9 +253,10 @@ public class ReplicaPlacementTest {
         placement.addDatabase("db2", 5, ""); // should be spread across all zones
         placement.placeReplicas();
         final Result<ReplicaRecord> replicaStateAfterDb2 = placement.getReplicaState();
-        final Map<?, Result<ReplicaRecord>> resultMapDb1 = replicaStateAfterDb1.intoGroups(Tables.REPLICA.RANGE_ID);
-        final Map<?, Result<ReplicaRecord>> resultMapDb2 = replicaStateAfterDb2.intoGroups(Tables.REPLICA.RANGE_ID);
-
+        final Map<Integer, Result<ReplicaRecord>> resultMapDb1 = replicaStateAfterDb1
+                                                                    .intoGroups(Tables.REPLICA.RANGE_ID);
+        final Map<Integer, Result<ReplicaRecord>> resultMapDb2 = replicaStateAfterDb2
+                                                                    .intoGroups(Tables.REPLICA.RANGE_ID);
         // The allocations for db1 should not have changed
         assertEquals(resultMapDb1.get(1), resultMapDb2.get(1));
     }
