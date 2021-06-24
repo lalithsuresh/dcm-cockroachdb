@@ -46,13 +46,14 @@ CREATE VIEW replica_to_node_constraint_matching AS
     SELECT rc.id AS replica_id,
            rc.range_id,
            rc.type,
+           rc.label_key,
            ARRAY_AGG(nl.id) AS node_id_list
     FROM replica_constraint rc
     JOIN node_label nl
         ON   rc.label_key = nl.label_key
          AND (rc.label_value IS NULL
               OR rc.label_value = nl.label_value)
-    GROUP BY rc.id, rc.range_id, rc.type;
+    GROUP BY rc.id, rc.range_id, rc.type, rc.label_key;
 
 
 -- Find the AZ for each node, if configured

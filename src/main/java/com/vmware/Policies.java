@@ -17,8 +17,8 @@ public class Policies {
                 "SELECT * FROM replica r " +
                 "JOIN replica_to_node_constraint_matching rncm ON " +
                 " r.id = rncm.replica_id " +
-                "CHECK (type != 'Required' OR contains(rncm.node_id_list, r.controllable__node) = true)" +
-                "  AND (type != 'Prohibited' OR contains(rncm.node_id_list, r.controllable__node) = false)");
+                "CHECK (type != 'required' OR contains(rncm.node_id_list, r.controllable__node) = true)" +
+                "AND (type != 'prohibited' OR contains(rncm.node_id_list, r.controllable__node) = false)");
     }
 
     /*
@@ -34,7 +34,7 @@ public class Policies {
         final String spreadReplicasAcrossAzs = "CREATE VIEW spread_replicas AS " +
                                       "SELECT * FROM count_per_shard_per_az " +
                                       "GROUP BY range_id " +
-                                      "maximize min(total)";
+                                      "MAXIMIZE min(total)";
         return List.of(countsPerShardPerAzVariable, spreadReplicasAcrossAzs);
     }
 
@@ -54,12 +54,24 @@ public class Policies {
         return List.of(countsPerShardPerAzVariable, spreadReplicasAcrossNodes);
     }
 
+    /*
+     * Never assign two replicas to the same node
+     */
+    private static List<String> distributeAcrossDistinctNodes() {
+        final String alwaysDistributeReplicasAcrossNodes = "CREATE VIEW distribute_across_nodes AS " +
+                                                           "SELECT * " +
+                                                           "FROM replica " +
+                                                           "GROUP BY replica.range_id " +
+                                                           "CHECK all_different(controllable__node)";
+        return List.of(alwaysDistributeReplicasAcrossNodes);
+    }
 
     public static List<String> defaultPolicies() {
         final List<String> policies = new ArrayList<>();
         policies.addAll(nodeAffinityAndAntiAffinity());
         policies.addAll(spreadReplicasAcrossAzs());
         policies.addAll(useMoreNodes());
+        policies.addAll(distributeAcrossDistinctNodes());
         return policies;
     }
 }
