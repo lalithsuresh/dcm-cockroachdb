@@ -26,6 +26,7 @@ CREATE TABLE replica (
     id INTEGER NOT NULL PRIMARY KEY auto_increment,
     range_id INTEGER NOT NULL,
     status VARCHAR(10) NOT NULL,
+    current_node INTEGER,
     controllable__node INTEGER,
     FOREIGN KEY (controllable__node) REFERENCES node(id) ON DELETE CASCADE,
     FOREIGN KEY (range_id) REFERENCES range(id) ON DELETE CASCADE
@@ -39,6 +40,16 @@ CREATE TABLE replica_constraint (
     label_value VARCHAR(30),
     FOREIGN KEY (id) REFERENCES replica(id) ON DELETE CASCADE
 );
+
+-- Select only ranges that have at least one replicas as pending
+CREATE VIEW pending_replicas AS
+    SELECT *
+    FROM replica
+    WHERE range_id IN
+        (SELECT range_id
+         FROM replica
+         GROUP BY range_id
+         HAVING ANY(status = 'pending'));
 
 -- For each replica, compute the set of nodes they are affine
 -- or anti-affine to (depending on the type of replica constraint)

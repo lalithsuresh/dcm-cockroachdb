@@ -14,7 +14,7 @@ public class Policies {
      */
     private static List<String> nodeAffinityAndAntiAffinity() {
         return List.of("CREATE VIEW node_affinity_anti_affinity AS " +
-                "SELECT * FROM replica r " +
+                "SELECT * FROM pending_replicas r " +
                 "JOIN replica_to_node_constraint_matching rncm ON " +
                 " r.id = rncm.replica_id " +
                 "CHECK (type != 'required' OR contains(rncm.node_id_list, r.controllable__node) = true)" +
@@ -27,7 +27,7 @@ public class Policies {
     private static List<String> spreadReplicasAcrossAzs() {
         final String countsPerShardPerAzVariable = "CREATE VIEW count_per_shard_per_az AS " +
                                        "SELECT r.range_id, na.az, count(*) as total " +
-                                       "FROM replica r " +
+                                       "FROM pending_replicas r " +
                                        "JOIN node_azs na" +
                                         " ON r.controllable__node = na.node_id " +
                                        "GROUP BY r.range_id, na.az";
@@ -44,7 +44,7 @@ public class Policies {
     private static List<String> useMoreNodes() {
         final String countsPerShardPerAzVariable = "CREATE VIEW count_per_node AS " +
                                                    "SELECT count(*) as total " +
-                                                   "FROM replica r " +
+                                                   "FROM pending_replicas r " +
                                                    "JOIN node n" +
                                                    " ON r.controllable__node = n.id " +
                                                    "GROUP BY n.id";
@@ -55,13 +55,26 @@ public class Policies {
     }
 
     /*
+     * Replicas that already have assignments should not be moved
+     */
+    private static List<String> doNotReassignReplicas() {
+        final String doNotReassignReplicas = "CREATE VIEW do_not_reassign AS " +
+                                            "SELECT * " +
+                                            "FROM pending_replicas " +
+                                            "WHERE status = 'running' " +
+                                            "CHECK current_node = controllable__node";
+        return List.of(doNotReassignReplicas);
+    }
+
+
+    /*
      * Never assign two replicas to the same node
      */
     private static List<String> distributeAcrossDistinctNodes() {
         final String alwaysDistributeReplicasAcrossNodes = "CREATE VIEW distribute_across_nodes AS " +
                                                            "SELECT * " +
-                                                           "FROM replica " +
-                                                           "GROUP BY replica.range_id " +
+                                                           "FROM pending_replicas " +
+                                                           "GROUP BY pending_replicas.range_id " +
                                                            "CHECK all_different(controllable__node)";
         return List.of(alwaysDistributeReplicasAcrossNodes);
     }
@@ -72,6 +85,7 @@ public class Policies {
         policies.addAll(spreadReplicasAcrossAzs());
         policies.addAll(useMoreNodes());
         policies.addAll(distributeAcrossDistinctNodes());
+        policies.addAll(doNotReassignReplicas());
         return policies;
     }
 }

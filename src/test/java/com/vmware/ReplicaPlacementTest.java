@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -230,5 +231,32 @@ public class ReplicaPlacementTest {
         Result<? extends Record> results = placement.placeReplicas();
         assertEquals(7, results.stream().filter(e -> e.get(Tables.REPLICA.RANGE_ID) == 2)
                                         .collect(Collectors.toSet()).size());
+    }
+
+
+    /*
+     * Performing replica placement a few at a time should not perturb existing allocations
+     */
+    @Test
+    public void incrementalPlacement() {
+        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        for (int i = 1; i <= 7; i++) {
+            placement.addNodeWithAttributes(i, List.of("az=us-" + i),
+                    Collections.emptyList(), Collections.emptyList());
+        }
+        // Place DB1 and record allocations
+        placement.addDatabase("db1", 5, ""); // should be spread across all zones
+        placement.placeReplicas();
+        final Result<ReplicaRecord> replicaStateAfterDb1 = placement.getReplicaState();
+
+        // Place DB2 and record allocations
+        placement.addDatabase("db2", 5, ""); // should be spread across all zones
+        placement.placeReplicas();
+        final Result<ReplicaRecord> replicaStateAfterDb2 = placement.getReplicaState();
+        final Map<?, Result<ReplicaRecord>> resultMapDb1 = replicaStateAfterDb1.intoGroups(Tables.REPLICA.RANGE_ID);
+        final Map<?, Result<ReplicaRecord>> resultMapDb2 = replicaStateAfterDb2.intoGroups(Tables.REPLICA.RANGE_ID);
+
+        // The allocations for db1 should not have changed
+        assertEquals(resultMapDb1.get(1), resultMapDb2.get(1));
     }
 }
