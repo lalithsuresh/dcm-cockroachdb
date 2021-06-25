@@ -22,6 +22,23 @@ public class Policies {
     }
 
     /*
+     * Spread out replicas across regions
+     */
+    private static List<String> spreadReplicasAcrossRegions() {
+        final String countsPerShardPerRegionVariable = "CREATE VIEW count_per_shard_per_region AS " +
+                "SELECT r.range_id, nr.region, count(*) as total " +
+                "FROM pending_replicas r " +
+                "JOIN node_regions nr" +
+                " ON r.controllable__node = nr.node_id " +
+                "GROUP BY r.range_id, nr.region";
+        final String spreadReplicasAcrossRegions = "CREATE VIEW spread_replicas_regions AS " +
+                "SELECT * FROM count_per_shard_per_region " +
+                "GROUP BY range_id " +
+                "MAXIMIZE min(total)";
+        return List.of(countsPerShardPerRegionVariable, spreadReplicasAcrossRegions);
+    }
+
+    /*
      * Spread out replicas across availability zones
      */
     private static List<String> spreadReplicasAcrossAzs() {
@@ -31,7 +48,7 @@ public class Policies {
                                        "JOIN node_azs na" +
                                         " ON r.controllable__node = na.node_id " +
                                        "GROUP BY r.range_id, na.az";
-        final String spreadReplicasAcrossAzs = "CREATE VIEW spread_replicas AS " +
+        final String spreadReplicasAcrossAzs = "CREATE VIEW spread_replicas_azs AS " +
                                       "SELECT * FROM count_per_shard_per_az " +
                                       "GROUP BY range_id " +
                                       "MAXIMIZE min(total)";
@@ -82,6 +99,7 @@ public class Policies {
     public static List<String> defaultPolicies() {
         final List<String> policies = new ArrayList<>();
         policies.addAll(nodeAffinityAndAntiAffinity());
+        policies.addAll(spreadReplicasAcrossRegions());
         policies.addAll(spreadReplicasAcrossAzs());
         policies.addAll(useMoreNodes());
         policies.addAll(distributeAcrossDistinctNodes());

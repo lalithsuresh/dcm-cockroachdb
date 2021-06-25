@@ -1,29 +1,28 @@
 package com.vmware;
 
+import com.google.common.collect.Sets;
 import com.vmware.generated.Tables;
 import com.vmware.generated.tables.records.ReplicaRecord;
-import org.jooq.Record;
 import org.jooq.Result;
-import org.jooq.TableField;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 
 /**
- * Unit test for simple App.
+ * Unit tests for placement logic
  */
 public class ReplicaPlacementTest {
     @Test
     public void testConstraintTables() {
-        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        final ReplicaPlacement placement = ReplicaPlacement.init();
 
         placement.addNodeWithAttributes(1, List.of("region=east", "az=us-east-1"), List.of("ram:64GB"),
                 List.of("ssd"));
@@ -40,25 +39,15 @@ public class ReplicaPlacementTest {
 
         placement.addDatabase("db1", 3, "[\"+ssd\", \"-region=east\"]");
         placement.addDatabase("db2", 3, "{'[\"+ssd\",\"+region=west\"]': 2, '[\"+region=east\"]': 1}");
-        final Result<? extends Record> results = placement.placeReplicas();
-        final TableField<ReplicaRecord, Integer> controllableNodeColumn = Tables.REPLICA.CONTROLLABLE__NODE;
-        results.intoGroups(Tables.REPLICA.RANGE_ID).forEach(
-                (rangeId, table) -> {
-                    if (rangeId == 1) {
-                        assertTrue(Set.of(4, 5, 6).containsAll(table.getValues(controllableNodeColumn)));
-                    } else {
-                        table.forEach(
-                                record -> {
-                                    if (record.get(Tables.REPLICA.ID) == 4 || record.get(Tables.REPLICA.ID) == 5) {
-                                        assertTrue(Set.of(4, 5, 6).contains(record.getValue(controllableNodeColumn)));
-                                    } else {
-                                        assertTrue(Set.of(1, 2, 3).contains(record.getValue(controllableNodeColumn)));
-                                    }
-                                }
-                        );
-                    }
-                }
-        );
+        placement.placeReplicas();
+        final Result<ReplicaRecord> db1 = placement.getReplicaRangesForDb("db1");
+        final Result<ReplicaRecord> db2 = placement.getReplicaRangesForDb("db2");
+        final Set<Integer> db1Nodes = db1.intoSet(Tables.REPLICA.CURRENT_NODE);
+        assertEquals(db1Nodes, Set.of(4, 5, 6));
+        final List<Integer> db2Nodes = db2.getValues(Tables.REPLICA.CURRENT_NODE);
+        assertTrue(Set.of(4, 5, 6).contains(db2Nodes.get(0)));
+        assertTrue(Set.of(4, 5, 6).contains(db2Nodes.get(1)));
+        assertTrue(Set.of(1, 2, 3).contains(db2Nodes.get(2)));
     }
 
     /*
@@ -68,7 +57,7 @@ public class ReplicaPlacementTest {
      */
     @Test
     public void evenReplicationAcrossAZs() {
-        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        final ReplicaPlacement placement = ReplicaPlacement.init();
         // AZ-1
         placement.addNodeWithAttributes(1, List.of("az=us-1"), Collections.emptyList(), Collections.emptyList());
         placement.addNodeWithAttributes(2, List.of("az=us-1"), Collections.emptyList(), Collections.emptyList());
@@ -85,16 +74,21 @@ public class ReplicaPlacementTest {
         placement.addDatabase("db1");
         placement.addDatabase("db2");
 
-        placement.printState();
-        Result<? extends Record> results = placement.placeReplicas();
+        placement.placeReplicas();
 
+        final Result<ReplicaRecord> db1 = placement.getReplicaRangesForDb("db1");
+        final Result<ReplicaRecord> db2 = placement.getReplicaRangesForDb("db2");
+        final Set<Integer> db1Nodes = db1.intoSet(Tables.REPLICA.CURRENT_NODE);
+        final Set<Integer> db2Nodes = db2.intoSet(Tables.REPLICA.CURRENT_NODE);
         // All nodes must be used
-        assertEquals(6, results.stream().map(e -> e.get("CONTROLLABLE__NODE")).collect(Collectors.toSet()).size());
+        assertEquals(Set.of(1, 2, 3, 4, 5, 6), Sets.union(db1Nodes, db2Nodes));
 
         // Each shard should have a different AZ
-        for (final var shardId : results.intoGroups(Tables.REPLICA.RANGE_ID).entrySet()) {
-            assertEquals(3, shardId.getValue().stream().map(e -> e.get("CONTROLLABLE__NODE"))
-                    .collect(Collectors.toSet()).size());
+        for (final var nodes: List.of(db1Nodes, db2Nodes)) {
+            assertEquals(3, nodes.size());
+            assertFalse(nodes.contains(1) && nodes.contains(2));
+            assertFalse(nodes.contains(3) && nodes.contains(4));
+            assertFalse(nodes.contains(5) && nodes.contains(6));
         }
     }
 
@@ -105,7 +99,7 @@ public class ReplicaPlacementTest {
      */
     @Test
     public void perReplicaConstraintsToSpecificAvailabilityZones() {
-        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        final ReplicaPlacement placement = ReplicaPlacement.init();
         // West-1, AZ-a/b
         placement.addNodeWithAttributes(1, List.of("region=us-west1", "az=us-west1-a"),
                 Collections.emptyList(), Collections.emptyList());
@@ -127,21 +121,19 @@ public class ReplicaPlacementTest {
                 "{'[\"+region=us-west1\"]': 2, '[\"+region=us-central1\"]': 1}");
 
         placement.printState();
-        Result<? extends Record> results = placement.placeReplicas();
-        results.intoGroups(Tables.REPLICA.RANGE_ID).forEach((rangeId, table) -> {
-            if (rangeId.equals(2)) { // west_app_db
-                table.forEach(r -> {
-                            final int id = r.get(Tables.REPLICA.ID);
-                            final int node = r.get(Tables.REPLICA.CONTROLLABLE__NODE);
-                            if (id == 4 || id == 5) {
-                                assertTrue(List.of(1, 2).contains(node));
-                            } else {
-                                assertEquals(3, node);
-                            }
-                        }
-                );
-            }
-        });
+        placement.placeReplicas();
+
+        final Result<ReplicaRecord> db1 = placement.getReplicaRangesForDb("db1");
+        final Set<Integer> db1Nodes = db1.intoSet(Tables.REPLICA.CURRENT_NODE);
+        assertTrue(db1Nodes.contains(1) || db1Nodes.contains(2));
+        assertTrue(db1Nodes.contains(3));
+        assertTrue(db1Nodes.contains(5) || db1Nodes.contains(6));
+
+        final Result<ReplicaRecord> westAppDb = placement.getReplicaRangesForDb("west_app_db");
+        final List<Integer> westAppDbNodes = westAppDb.getValues(Tables.REPLICA.CURRENT_NODE);
+
+        assertTrue(List.of(1, 2).containsAll(westAppDbNodes.subList(0, 2)));
+        assertEquals(3, westAppDbNodes.get(2));
     }
 
     /*
@@ -151,7 +143,7 @@ public class ReplicaPlacementTest {
      */
     @Test
     public void multipleApplicationsWritingToDifferentDatabases() {
-        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        final ReplicaPlacement placement = ReplicaPlacement.init();
 
         // US-1
         placement.addNodeWithAttributes(1, List.of("az=us-1"),
@@ -171,13 +163,16 @@ public class ReplicaPlacementTest {
 
 
         placement.addDatabase("app1_db", 5, ""); // should be spread across all zones
-        placement.addDatabase("app2_db", 3, "[\"+az=us-2\"]"); // should be spread across all zones
+        placement.addDatabase("app2_db", 3, "[\"+az=us-2\"]"); // should be confined to zone 2
 
-        Result<? extends Record> results = placement.placeReplicas();
-        results.stream().filter(e -> e.get(Tables.REPLICA.RANGE_ID) == 2)
-                .forEach(
-                        r -> assertTrue(List.of(4, 5, 6).contains(r.get(Tables.REPLICA.CONTROLLABLE__NODE)))
-                );
+        placement.placeReplicas();
+        final Set<Integer> app1DbNodes = placement.getReplicaRangesForDb("app1_db")
+                .intoSet(Tables.REPLICA.CURRENT_NODE);
+        assertTrue(Sets.intersection(Set.of(1, 2, 3), app1DbNodes).size() > 1);
+        assertTrue(Sets.intersection(Set.of(4, 5, 6), app1DbNodes).size() > 1);
+        final Set<Integer> app2DbNodes = placement.getReplicaRangesForDb("app2_db")
+                                             .intoSet(Tables.REPLICA.CURRENT_NODE);
+        assertEquals(Set.of(4, 5, 6), app2DbNodes);
     }
 
     /*
@@ -187,7 +182,7 @@ public class ReplicaPlacementTest {
      */
     @Test
     public void stricterReplicationForATableAndItsSecondaryIndexes() {
-        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        final ReplicaPlacement placement = ReplicaPlacement.init();
         placement.addNodeWithAttributes(1, Collections.emptyList(),
                 Collections.emptyList(), List.of("ssd"));
         placement.addNodeWithAttributes(2, Collections.emptyList(),
@@ -206,11 +201,9 @@ public class ReplicaPlacementTest {
         // TODO: The actual example assigns constraints to only one table
         //       within this database. Update the schema to be able to do so.
         placement.addDatabase("db", 5, "[\"+ssd\"]"); // should be spread across all zones
-        Result<? extends Record> results = placement.placeReplicas();
-        results.stream().filter(e -> e.get(Tables.REPLICA.RANGE_ID) == 1)
-                .forEach(
-                        r -> assertTrue(List.of(1, 2, 3, 4, 5).contains(r.get(Tables.REPLICA.CONTROLLABLE__NODE)))
-                );
+        placement.placeReplicas();
+        final Set<Integer> dbNodes = placement.getReplicaRangesForDb("db").intoSet(Tables.REPLICA.CURRENT_NODE);
+        assertEquals(Set.of(1, 2, 3, 4, 5), dbNodes);
     }
 
     /*
@@ -220,7 +213,7 @@ public class ReplicaPlacementTest {
      */
     @Test
     public void tweakingTheReplicationOfSystemRanges() {
-        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        final ReplicaPlacement placement = ReplicaPlacement.init();
         for (int i = 1; i <= 7; i++) {
             placement.addNodeWithAttributes(i, List.of("az=us-" + i),
                     Collections.emptyList(), Collections.emptyList());
@@ -228,9 +221,9 @@ public class ReplicaPlacementTest {
         // TODO: have a default range and a metadata range
         placement.addDatabase("something", 5, ""); // should be spread across all zones
         placement.addDatabase("meta", 7, ""); // should be spread across all zones
-        Result<? extends Record> results = placement.placeReplicas();
-        assertEquals(7, results.stream().filter(e -> e.get(Tables.REPLICA.RANGE_ID) == 2)
-                                        .collect(Collectors.toSet()).size());
+        placement.placeReplicas();
+        final Set<Integer> dbNodes = placement.getReplicaRangesForDb("meta").intoSet(Tables.REPLICA.CURRENT_NODE);
+        assertEquals(7, dbNodes.size());
     }
 
 
@@ -239,7 +232,7 @@ public class ReplicaPlacementTest {
      */
     @Test
     public void incrementalPlacement() {
-        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        final ReplicaPlacement placement = ReplicaPlacement.init();
         for (int i = 1; i <= 7; i++) {
             placement.addNodeWithAttributes(i, List.of("az=us-" + i),
                     Collections.emptyList(), Collections.emptyList());

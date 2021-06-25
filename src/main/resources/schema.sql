@@ -75,3 +75,13 @@ CREATE VIEW node_azs AS
     JOIN node
         ON node.id = nl.id
     WHERE nl.label_key = 'az' AND nl.label_value IS NOT NULL;
+
+
+-- Find the region for each node, if configured
+CREATE VIEW node_regions AS
+    SELECT node.id AS node_id,
+           nl.label_value AS region
+    FROM node_label nl
+    JOIN node
+        ON node.id = nl.id
+    WHERE nl.label_key = 'region' AND nl.label_value IS NOT NULL;

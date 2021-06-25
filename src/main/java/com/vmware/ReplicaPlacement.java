@@ -34,9 +34,20 @@ public class ReplicaPlacement {
     private final DSLContext conn;
     private final Model model;
 
-    ReplicaPlacement(final List<String> constraints) {
+    private ReplicaPlacement(final List<String> constraints) {
         conn = setup();
         model = Model.build(conn, constraints);
+    }
+
+    public static ReplicaPlacement init() {
+        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+
+        // Add system ranges
+        placement.addDatabase("meta", 5, "");
+        placement.addDatabase("liveness", 5, "");
+        placement.addDatabase("system", 5, "");
+        placement.addDatabase("timeseries", 1, "");
+        return placement;
     }
 
     /*
@@ -58,6 +69,15 @@ public class ReplicaPlacement {
                      .forEach(kvPair -> addNodeLabel(nodeId, kvPair.key, kvPair.value));
     }
 
+    public Result<ReplicaRecord> getReplicaRangesForDb(final String name) {
+        return conn.select(Tables.REPLICA.asterisk()).from(Tables.DATABASE)
+                .join(Tables.RANGE)
+                .on(Tables.RANGE.DATABASE_ID.eq(Tables.DATABASE.ID))
+                .join(Tables.REPLICA)
+                .on(Tables.REPLICA.RANGE_ID.eq(Tables.RANGE.ID))
+                .where(Tables.DATABASE.NAME.eq(name))
+                .fetchInto(Tables.REPLICA);
+    }
 
     /*
      * Create a database with defaults for num_replicas and constraints
