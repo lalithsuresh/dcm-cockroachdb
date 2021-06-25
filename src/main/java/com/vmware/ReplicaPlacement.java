@@ -47,6 +47,7 @@ public class ReplicaPlacement {
         placement.addDatabase("liveness", 5, "");
         placement.addDatabase("system", 5, "");
         placement.addDatabase("timeseries", 1, "");
+        placement.placeReplicas();
         return placement;
     }
 
