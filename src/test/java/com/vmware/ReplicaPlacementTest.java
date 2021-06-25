@@ -119,12 +119,13 @@ public class ReplicaPlacementTest {
         placement.addDatabase("db1"); // should be spread across all zones
         placement.addDatabase("west_app_db", 3,
                 "{'[\"+region=us-west1\"]': 2, '[\"+region=us-central1\"]': 1}");
-
+        placement.bootstrap();
         placement.printState();
         placement.placeReplicas();
 
         final Result<ReplicaRecord> db1 = placement.getReplicaRangesForDb("db1");
         final Set<Integer> db1Nodes = db1.intoSet(Tables.REPLICA.CURRENT_NODE);
+        placement.printState();
         assertTrue(db1Nodes.contains(1) || db1Nodes.contains(2));
         assertTrue(db1Nodes.contains(3));
         assertTrue(db1Nodes.contains(5) || db1Nodes.contains(6));
@@ -160,7 +161,7 @@ public class ReplicaPlacementTest {
                 Collections.emptyList(), Collections.emptyList());
         placement.addNodeWithAttributes(6, List.of("az=us-2"),
                 Collections.emptyList(), Collections.emptyList());
-
+        placement.bootstrap();
 
         placement.addDatabase("app1_db", 5, ""); // should be spread across all zones
         placement.addDatabase("app2_db", 3, "[\"+az=us-2\"]"); // should be confined to zone 2
@@ -197,6 +198,7 @@ public class ReplicaPlacementTest {
                 Collections.emptyList(), List.of("hdd"));
         placement.addNodeWithAttributes(7, Collections.emptyList(),
                 Collections.emptyList(), List.of("hdd"));
+        placement.bootstrap();
 
         // TODO: The actual example assigns constraints to only one table
         //       within this database. Update the schema to be able to do so.
@@ -218,9 +220,8 @@ public class ReplicaPlacementTest {
             placement.addNodeWithAttributes(i, List.of("az=us-" + i),
                     Collections.emptyList(), Collections.emptyList());
         }
-        // TODO: have a default range and a metadata range
-        placement.addDatabase("something", 5, ""); // should be spread across all zones
-        placement.addDatabase("meta", 7, ""); // should be spread across all zones
+        placement.bootstrap();
+        placement.editDatabase("meta", 7, ""); // should be spread across all zones
         placement.placeReplicas();
         final Set<Integer> dbNodes = placement.getReplicaRangesForDb("meta").intoSet(Tables.REPLICA.CURRENT_NODE);
         assertEquals(7, dbNodes.size());
@@ -237,6 +238,7 @@ public class ReplicaPlacementTest {
             placement.addNodeWithAttributes(i, List.of("az=us-" + i),
                     Collections.emptyList(), Collections.emptyList());
         }
+        placement.bootstrap();
         // Place DB1 and record allocations
         placement.addDatabase("db1", 5, ""); // should be spread across all zones
         placement.placeReplicas();

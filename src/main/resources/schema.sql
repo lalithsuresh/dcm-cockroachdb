@@ -12,7 +12,8 @@ CREATE TABLE node_label (
 CREATE TABLE database (
     id INTEGER NOT NULL PRIMARY KEY auto_increment,
     name VARCHAR(100) NOT NULL,
-    num_replicas INTEGER NOT NULL
+    num_replicas INTEGER NOT NULL,
+    placement_constraints VARCHAR(100) NOT NULL
 );
 
 CREATE TABLE range (

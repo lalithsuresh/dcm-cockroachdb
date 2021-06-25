@@ -10,6 +10,15 @@ import java.util.List;
 
 public class Policies {
     /*
+     * Given that pending_replicas is a view, not a table, we explicitly configure a domain constraint
+     */
+    private static List<String> nodeDomain() {
+        return List.of("CREATE VIEW node_domain AS " +
+                "SELECT * FROM pending_replicas r " +
+                "CHECK controllable__node IN (SELECT node.id FROM node)");
+    }
+
+    /*
      * Enforce the affinity/anti-affinities computed in the replica_to_node_constraint_matching view
      */
     private static List<String> nodeAffinityAndAntiAffinity() {
@@ -98,6 +107,7 @@ public class Policies {
 
     public static List<String> defaultPolicies() {
         final List<String> policies = new ArrayList<>();
+        policies.addAll(nodeDomain());
         policies.addAll(nodeAffinityAndAntiAffinity());
         policies.addAll(spreadReplicasAcrossRegions());
         policies.addAll(spreadReplicasAcrossAzs());

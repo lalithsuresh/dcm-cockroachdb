@@ -40,15 +40,16 @@ public class ReplicaPlacement {
     }
 
     public static ReplicaPlacement init() {
-        final ReplicaPlacement placement = new ReplicaPlacement(Policies.defaultPolicies());
+        return new ReplicaPlacement(Policies.defaultPolicies());
+    }
 
+    public void bootstrap() {
         // Add system ranges
-        placement.addDatabase("meta", 5, "");
-        placement.addDatabase("liveness", 5, "");
-        placement.addDatabase("system", 5, "");
-        placement.addDatabase("timeseries", 1, "");
-        placement.placeReplicas();
-        return placement;
+        addDatabase("meta", 5, "");
+        addDatabase("liveness", 5, "");
+        addDatabase("system", 5, "");
+        addDatabase("timeseries", 1, "");
+        placeReplicas();
     }
 
     /*
@@ -88,6 +89,49 @@ public class ReplicaPlacement {
     }
 
     /*
+     * Edit a database to a new set of  num_replicas and constraints
+     */
+    public void editDatabase(final String name, final int numReplicas, final String constraintsJson) {
+        final DatabaseRecord databaseRecord = conn.selectFrom(Tables.DATABASE).where(Tables.DATABASE.NAME.eq(name))
+                                                  .fetchOne();
+        assert databaseRecord != null : "Database named " + name + " does not exist";
+        final int oldNumReplicas = databaseRecord.getNumReplicas();
+        final String oldConstraints = databaseRecord.getPlacementConstraints();
+        final List<List<String>> allConstraints = parseJsonConstraints(numReplicas, constraintsJson);
+
+        Result<RangeRecord> ranges = conn.select(Tables.RANGE.asterisk())
+                .from(Tables.RANGE)
+                .join(Tables.DATABASE)
+                .on(Tables.RANGE.DATABASE_ID.eq(Tables.DATABASE.ID))
+                .where(Tables.DATABASE.NAME.eq(name))
+                .fetchInto(Tables.RANGE);
+        if (oldNumReplicas != numReplicas) {
+            assert numReplicas > oldNumReplicas;
+            for (int i = oldNumReplicas; i < numReplicas; i++) {
+                // Add new replicas for each range
+                ranges.forEach(r -> addReplica(r.getId()));
+            }
+        }
+        ranges.forEach(r -> conn.deleteFrom(Tables.REPLICA_CONSTRAINT)
+                .where(Tables.REPLICA_CONSTRAINT.RANGE_ID.eq(r.getId()))
+                .execute());
+        ranges.forEach(r -> {
+            final Result<ReplicaRecord> replicaRecords = conn.selectFrom(Tables.REPLICA)
+                    .where(Tables.REPLICA.RANGE_ID.eq(r.getId()))
+                    .fetch();
+            for (int i = 0; i < replicaRecords.size(); i++) {
+                    final ReplicaRecord replicaRecord = replicaRecords.get(i);
+                    if (allConstraints.size() > i) {
+                        configureReplicaConstraints(replicaRecord, allConstraints.get(i));
+                    } else {
+                        configureReplicaConstraints(replicaRecord, Collections.emptyList());
+                    }
+                }
+            }
+        );
+    }
+
+    /*
      * Create a database with specified num_replicas and constraints. The database will be mapped
      * to a single range by default.
      */
@@ -95,15 +139,41 @@ public class ReplicaPlacement {
         final DatabaseRecord databaseRecord = conn.newRecord(Tables.DATABASE);
         databaseRecord.setName(name);
         databaseRecord.setNumReplicas(numReplicas);
+        databaseRecord.setPlacementConstraints(constraintsJson);
         databaseRecord.store();
 
         // Start with only 1 range
         final RangeRecord rangeRecord = conn.newRecord(Tables.RANGE);
         rangeRecord.setDatabaseId(databaseRecord.getId());
         rangeRecord.store();
+        printState();
+        addReplicasUsingConstraints(rangeRecord, numReplicas, constraintsJson);
+    }
 
-        // Parse the set of constraints according to their scope
-        // https://www.cockroachlabs.com/docs/v21.1/configure-replication-zones#scope-of-constraints
+    public void addReplicasUsingConstraints(final RangeRecord rangeRecord, final int numReplicas,
+                                            final String constraintsJson) {
+        final List<List<String>> allConstraints = parseJsonConstraints(numReplicas, constraintsJson);
+
+        // The total number of replicas constrained cannot be greater than the total number of replicas for the zone
+        // (num_replicas). However, if the total number of replicas constrained is less than the total
+        // number of replicas for the zone, the non-constrained replicas will be allowed on any nodes/stores.
+        assert allConstraints.size() <= numReplicas;
+        for (int i = 0; i < numReplicas; i++) {
+            final ReplicaRecord replicaRecord = addReplica(rangeRecord.getId());
+            if (constraintsJson.isEmpty()) {
+                continue;
+            }
+            if (allConstraints.size() > i) {
+                configureReplicaConstraints(replicaRecord, allConstraints.get(i));
+            } else {
+                configureReplicaConstraints(replicaRecord, Collections.emptyList());
+            }
+        }
+    }
+
+    // Parse the set of constraints according to their scope
+    // https://www.cockroachlabs.com/docs/v21.1/configure-replication-zones#scope-of-constraints
+    private List<List<String>> parseJsonConstraints(final int numReplicas, final String constraintsJson) {
         final JsonElement jsonElement = JsonParser.parseString(constraintsJson);
         final List<List<String>> allConstraints = new ArrayList<>();
 
@@ -125,7 +195,7 @@ public class ReplicaPlacement {
         // of constraints to an integer number of replicas in each range that the constraints should apply to.
         else if (jsonElement.isJsonObject()) {
             final JsonObject jsonObject = jsonElement.getAsJsonObject();
-            for (final Map.Entry<String, JsonElement> entry: jsonObject.entrySet()) {
+            for (final Map.Entry<String, JsonElement> entry : jsonObject.entrySet()) {
                 final String listOfConstraints = entry.getKey();
                 final int numberOfReplicas = entry.getValue().getAsInt();
                 for (int i = 0; i < numberOfReplicas; i++) {
@@ -133,18 +203,7 @@ public class ReplicaPlacement {
                 }
             }
         }
-
-        // The total number of replicas constrained cannot be greater than the total number of replicas for the zone
-        // (num_replicas). However, if the total number of replicas constrained is less than the total
-        // number of replicas for the zone, the non-constrained replicas will be allowed on any nodes/stores.
-        assert allConstraints.size() <= numReplicas;
-        for (int i = 0; i < numReplicas; i++) {
-            if (allConstraints.size() > i) {
-                addReplica(rangeRecord.getId(), allConstraints.get(i));
-            } else {
-                addReplica(rangeRecord.getId(), Collections.emptyList());
-            }
-        }
+        return allConstraints;
     }
 
     /*
@@ -184,19 +243,25 @@ public class ReplicaPlacement {
      * TODO: Add voting/non-voting replica distinction later
      * TODO: Support per-replica constraint syntax as well
      */
-    private void addReplica(final int rangeId, final List<String> constraints) {
-        ReplicaRecord replicaRecord = conn.insertInto(Tables.REPLICA)
-                .values(AUTOGENERATED_KEY, rangeId, "pending", null, null)
-                .returning(Tables.REPLICA.ID)
-                .fetchOne();
+    private ReplicaRecord addReplica(final int rangeId) {
+        final ReplicaRecord replicaRecord = conn.newRecord(Tables.REPLICA);
+        replicaRecord.setRangeId(rangeId);
+        replicaRecord.setStatus("pending");
+        replicaRecord.setCurrentNode(null);
+        replicaRecord.setControllable_Node(null);
+        replicaRecord.store();
+        return replicaRecord;
+    }
+
+    private void configureReplicaConstraints(final ReplicaRecord replicaRecord, final List<String> constraints) {
         constraints.stream().filter(e -> e.startsWith("+"))
                 .map(l -> toKeyValuePair(l.substring(1), "="))
                 .forEach(kvPair -> addRequiredReplicaConstraint(replicaRecord.getId(),
-                        rangeId, kvPair.key, kvPair.value));
+                        replicaRecord.getRangeId(), kvPair.key, kvPair.value));
         constraints.stream().filter(e -> e.startsWith("-"))
                 .map(l -> toKeyValuePair(l.substring(1), "="))
                 .forEach(kvPair -> addProhibitedReplicaConstraint(replicaRecord.getId(),
-                        rangeId, kvPair.key, kvPair.value));
+                        replicaRecord.getRangeId(), kvPair.key, kvPair.value));
     }
 
     private List<String> arrayToConstraints(final JsonElement jsonElement) {
