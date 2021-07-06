@@ -210,7 +210,6 @@ public class ReplicaPlacement {
      * Run the DCM model to compute a placement decision for new replicas
      */
     public Result<? extends Record> placeReplicas() {
-        model.updateData();
         final Result<? extends Record> solution = model.solve(Tables.PENDING_REPLICAS.getName());
         solution.forEach(
             r -> conn.update(Tables.REPLICA)
@@ -241,7 +240,6 @@ public class ReplicaPlacement {
      * https://www.cockroachlabs.com/docs/v21.1/configure-replication-zones#types-of-constraints
      *
      * TODO: Add voting/non-voting replica distinction later
-     * TODO: Support per-replica constraint syntax as well
      */
     private ReplicaRecord addReplica(final int rangeId) {
         final ReplicaRecord replicaRecord = conn.newRecord(Tables.REPLICA);
