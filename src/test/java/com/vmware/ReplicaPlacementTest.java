@@ -6,6 +6,7 @@ import com.vmware.generated.tables.records.ReplicaRecord;
 import org.jooq.Result;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -172,7 +173,7 @@ public class ReplicaPlacementTest {
         assertTrue(Sets.intersection(Set.of(1, 2, 3), app1DbNodes).size() > 1);
         assertTrue(Sets.intersection(Set.of(4, 5, 6), app1DbNodes).size() > 1);
         final Set<Integer> app2DbNodes = placement.getReplicaRangesForDb("app2_db")
-                                             .intoSet(Tables.REPLICA.CURRENT_NODE);
+                .intoSet(Tables.REPLICA.CURRENT_NODE);
         assertEquals(Set.of(4, 5, 6), app2DbNodes);
     }
 
@@ -249,10 +250,36 @@ public class ReplicaPlacementTest {
         placement.placeReplicas();
         final Result<ReplicaRecord> replicaStateAfterDb2 = placement.getReplicaState();
         final Map<Integer, Result<ReplicaRecord>> resultMapDb1 = replicaStateAfterDb1
-                                                                    .intoGroups(Tables.REPLICA.RANGE_ID);
+                .intoGroups(Tables.REPLICA.RANGE_ID);
         final Map<Integer, Result<ReplicaRecord>> resultMapDb2 = replicaStateAfterDb2
-                                                                    .intoGroups(Tables.REPLICA.RANGE_ID);
+                .intoGroups(Tables.REPLICA.RANGE_ID);
         // The allocations for db1 should not have changed
         assertEquals(resultMapDb1.get(1), resultMapDb2.get(1));
+    }
+
+    @Test
+    public void rebalanceByQps() {
+        final ReplicaPlacement placement = ReplicaPlacement.init();
+        placement.addNodeWithAttributes(1, List.of("az=us-1"), Collections.emptyList(), Collections.emptyList());
+        placement.addNodeWithAttributes(2, List.of("az=us-1"), Collections.emptyList(), Collections.emptyList());
+        placement.addNodeWithAttributes(3, List.of("az=us-1"), Collections.emptyList(), Collections.emptyList());
+        placement.addNodeWithAttributes(4, List.of("az=us-2"), Collections.emptyList(), Collections.emptyList());
+        placement.addNodeWithAttributes(5, List.of("az=us-3"), Collections.emptyList(), Collections.emptyList());
+        placement.addNodeWithAttributes(6, List.of("az=us-4"), Collections.emptyList(), Collections.emptyList());
+        placement.addNodeWithAttributes(7, List.of("az=us-4"), Collections.emptyList(), Collections.emptyList());
+        placement.addNodeWithAttributes(8, List.of("az=us-4"), Collections.emptyList(), Collections.emptyList());
+        placement.bootstrap();
+        // Place DB1 and record allocations
+        placement.addDatabase("db1", 5, ""); // should be spread across all AZs
+        placement.addDatabase("db2", 5, ""); // should be spread across all AZs
+        placement.addDatabase("db3", 5, ""); // should be spread across all AZs
+        placement.placeReplicas();
+        placement.addDatabase("db4", 3, "[\"+az=us-1\"]"); // should be mapped to us-1
+        placement.placeReplicas();
+
+        // Add some load to replicas of db2. This should cause some nodes in us-1 to be overloaded.
+        placement.updateQpsForDb("db4", 70);
+        placement.migrateReplicasOnOverloadedNodes(100);
+        placement.qpsPerNode().forEach(r -> assertTrue(r.get(1, BigDecimal.class).intValue() <= 100));
     }
 }

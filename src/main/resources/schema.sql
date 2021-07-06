@@ -29,6 +29,7 @@ CREATE TABLE replica (
     status VARCHAR(10) NOT NULL,
     current_node INTEGER,
     controllable__node INTEGER,
+    qps INTEGER,
     FOREIGN KEY (controllable__node) REFERENCES node(id) ON DELETE CASCADE,
     FOREIGN KEY (range_id) REFERENCES range(id) ON DELETE CASCADE
 );

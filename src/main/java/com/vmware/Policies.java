@@ -92,7 +92,6 @@ public class Policies {
         return List.of(doNotReassignReplicas);
     }
 
-
     /*
      * Never assign two replicas to the same node
      */
@@ -105,6 +104,23 @@ public class Policies {
         return List.of(alwaysDistributeReplicasAcrossNodes);
     }
 
+    /*
+     * Prefer less loaded nodes
+     */
+    private static List<String> distributeByQps() {
+        final String computeIncidentLoad = "CREATE VIEW compute_incident_load AS " +
+                                           "SELECT sum(qps) as incident_load " +
+                                           "FROM pending_replicas " +
+                                           "JOIN node " +
+                                           "   ON controllable__node = node.id " +
+                                           "GROUP BY node.id";
+        final String distributeByQps = "CREATE VIEW distribute_by_qps AS " +
+                                        "SELECT * " +
+                                        "FROM compute_incident_load " +
+                                        "MAXIMIZE min(incident_load)";
+        return List.of(computeIncidentLoad, distributeByQps);
+    }
+
     public static List<String> defaultPolicies() {
         final List<String> policies = new ArrayList<>();
         policies.addAll(nodeDomain());
@@ -114,6 +130,7 @@ public class Policies {
         policies.addAll(useMoreNodes());
         policies.addAll(distributeAcrossDistinctNodes());
         policies.addAll(doNotReassignReplicas());
+        policies.addAll(distributeByQps());
         return policies;
     }
 }
